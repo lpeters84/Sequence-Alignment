@@ -1,0 +1,315 @@
+---
+title: "Sequence Alignment"
+author: "Lauryn Peters"
+date: "2023-11-08"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+data_sam <- read.csv("C:\\Users\\laury\\OneDrive\\Documents\\UBC 2023-2024\\BMEG 310\\Assignments\\Assignment 3\\single_cell_RNA_seq_bam.sam", nrows=73, sep="\t", header=FALSE, fill=TRUE)
+
+data_var <- read.csv("C:\\Users\\laury\\OneDrive\\Documents\\UBC 2023-2024\\BMEG 310\\Assignments\\Assignment 3\\RNA_seq_annotated_variants.vcf", sep="\t", header=FALSE, fill=TRUE)
+
+```
+
+```{r}
+# Part 1 - Create sequence alignment algorithm
+
+seq1 <- c('-','A','T','T','C','G','A','C')
+seq2 <- c('-','A','T','C','A','C')
+
+names <- list(seq1, seq2)
+nwMat <- matrix(nrow = length(seq1), ncol = length(seq2), dimnames = names)
+
+# initialization
+nwMat[1,1] <- 0
+
+for (i in 1:length(seq2)-1) {
+  nwMat[1,i+1] <- -2*i
+}
+for (j in 1:length(seq1)-1) {
+  nwMat[j+1,1] <- -2*j
+}
+
+# matrix filling
+for (k in 2:length(seq1)) { # k is rows
+  for (l in 2:length(seq2)) { # l is cols
+    left <- nwMat[k, l-1] - 2
+    up <- nwMat[k-1, l] - 2
+    diagVal <- ifelse(rownames(nwMat)[k] == colnames(nwMat)[l], 1, 
+                  ifelse(rownames(nwMat)[k] == "C" && colnames(nwMat)[l] == "T", -1, 
+                                ifelse(rownames(nwMat)[k] == "T" && colnames(nwMat)[l] == "C", -1,
+                                       ifelse(rownames(nwMat)[k] == "A" && colnames(nwMat)[l] == "G", -1,
+                                              ifelse(rownames(nwMat)[k] == "G" && colnames(nwMat)[l] == "A", -1, -5)))))
+    diag <- nwMat[k-1, l-1] + diagVal
+    
+    nwMat[k,l] <- max(left, up, diag)
+  }
+}
+
+nwMat
+
+```
+
+
+# Q3.1
+
+SN - reference sequence name (name of the chromosome that the read is from)
+LN - reference sequence length (length of the read)
+
+```{r}
+
+index <- which(data_sam$V2 == "SN:X")
+data_sam$V3[index] # returns the length in base pairs
+
+```
+
+```{r}
+
+sam <- read.csv("single_cell_RNA_seq_bam.sam", sep="\t", header=FALSE, 
+                comment.char="@", col.names = paste0("V",seq_len(30)), fill=TRUE)
+sam <- sam[paste0("V",seq_len(11))]
+
+length(rownames(sam)) # returns the number of rows
+
+sam[10, ] # displays the 10th row of the SAM file 
+
+sum(sam$V3 == "X") # returns the number of reads that align with chromosome X
+
+bqSub <- sam[which(sam$V3 == "X"), ]
+bq <- c()
+
+for (i in 1:length(rownames(bqSub))) {
+  bq <- c(bq, utf8ToInt(bqSub$V11[i])-33)
+}
+
+mean(bq) # returns the average base quality for reads aligning with chromosome X
+
+reads <- lapply(sam$V11, function(x) utf8ToInt(x) - 33)
+vector_bq <- unlist(reads)
+qualMat <- matrix(vector_bq, ncol=58, byrow=TRUE)
+
+boxplot(qualMat) # quality is worse at the beginning and the end. All greater than 35 which is good
+
+```
+
+
+```{r}
+# the POS column (column V4) contains the leftmost mapping position of the reads
+
+Hspa8 <- subset(sam, sam$V3 == 9 & sam$V4 >= 40801273 & sam$V4 <= 40805199)
+length(rownames(Hspa8)) # returns the number of reads that hase their leftmost mapping position aligned between bases 40801273 and 40805199 on chromosome 9
+```
+
+```{r}
+
+sum(ifelse(sam$V5 < 50, 1, 0)) # returns the number of reads that have a mapping quality less than 50
+```
+
+```{r}
+
+subsam <- sam[which(sam$V5 < 50), ]
+mean(subsam$V5) # returns the mean mapping quality of reads with a mapping quality less than 50
+```
+
+```{r}
+
+tomato <- sam[which(sam$V3 == "tdTomato"), ]
+length(tomato$V3) # returns the number of reads that align to the tdTomato sequence
+
+length(tomato$V3)/length(sam$V3)*100 # returns the percentage of reads that align to the tdTomato sequence
+
+```
+Because the number of reads that align to tdTomato are greater than zero, we would expect the cell to emit fluorescently to some extent. It would most likely be very minimal however because the percentage is so low (less than 1%)
+
+purpose to see the cell more clearly. cell can be tracked
+
+```{r, include=FALSE}
+
+vcf_con <- file("RNA_seq_annotated_variants.vcf", open="r")
+vcf_file <- readLines(vcf_con)
+close(vcf_con)
+vcf <- data.frame(vcf_file)
+header <- vcf[grepl("##", vcf$vcf_file), ]
+factor(header)
+variants <- read.csv("RNA_seq_annotated_variants.vcf", skip=length(header),
+header=TRUE, sep="\t")
+
+```
+
+```{r}
+
+ref <- variants$REF[1] # the reference allele is G
+alt <- variants$ALT[1] # the alternate allele is A
+
+ref
+alt
+```
+
+```{r}
+
+info <- as.character(variants$INFO[1])
+split <- strsplit(info, ";")
+ann <- split[[1]][grep("ANN", split[[1]])] # returns ANN info value contents 
+ann
+```
+
+```{r}
+
+strsplit(ann, ",")
+```
+
+alt - SNP (turns into A from G)
+intron variant
+MODIFIER - estimated impact
+Sulf1 - gene name
+ENSMUSG00000016918 - gene ID
+transcript - feature type (which type of feature is in the next field)
+ENSMUST00000088585.9 - feature ID (transcript ID)
+protein_coding - transcript biotype
+2/21 - exon or intron rank over (divided by) total number of exons or introns
+c.-133+17418G>A - HGVS.c: Variant using HGVS notation (DNA level)
+
+
+```{r}
+# simplify INFO column in variants to only include first annotation (used for all subsequent questions)
+
+for (i in 1:dim(variants)[1]) {
+  info <- as.character(variants$INFO[i])
+  split <- strsplit(info, ";")
+  ann <- split[[1]][grep("ANN", split[[1]])] # ANN info value contents 
+  variants$INFO[i] <- strsplit(ann, ",")[[1]][1]
+}
+
+View(variants)
+```
+
+
+```{r}
+
+ref4 <- variants$REF[683] # reference allele is ACAGGGG
+alt4 <- variants$ALT[683] # alternate allele is A
+
+ann4 <- variants$INFO[683] # ANN info value contents 
+
+variants$INFO[683]
+                         
+```
+
+# Description of values
+
+alt - turns into A from ACAGGGG
+frameshift variant, splice acceptor variant, splice region variant, and intron variant
+HIGH - estimated impact: comes from splice acceptor variant
+Rps19 - gene name
+ENSMUSG00000040952 - gene ID
+transcript - feature type (which type of feature is in the next field)
+ENSMUST00000108428.7 - feature ID (transcript ID)
+protein_coding - transcript biotype
+5/5 - exon or intron rank over (divided by) total number of exons or introns
+c.357-2_360delAGGGGC - HGVS.c: Variant using HGVS notation (DNA level)
+p.Gly120fs - HGVS.p: If variant is coding, this field describes the variant using HGVS notation (Protein level)
+357/639 - CDS_position / CDS_len: Position and number of coding bases (one based includes START and STOP codons)
+119/212 - Protein_position / Protein_len: Position and number of AA (one based, including START, but not STOP)
+
+INFO_REALIGN_3_PRIME - errors, warnings or informative message that can affect annotation accuracy: Variant has been realigned to the most 3-prime position within the transcript. This is usually done to comply with HGVS specification to always report the most 3-prime annotation.
+
+
+```{r}
+
+sum(grepl("HIGH", variants$INFO)) # returns number of HIGH impact variants we see in total
+
+```
+
+
+a frameshift mutation results from an insertion or deletion of a nucleotide (base)
+a missense mutation results from a substitution of a nucleotide (base)
+
+frameshift mutations have a greater impact than missense mutations because a missense only affects the amino acid that the nucleotide contributes to but the frameshift affects the amino acid of the nucleotide that the nucleotide contributes to as well as every subsequent amino acid
+
+```{r}
+
+sum(grepl("intron_variant", variants$INFO)) + sum(grepl("intergenic_region", variants$INFO))
+```
+does this mean that the mouse has been genetically modified to be diseased? 
+
+
+
+```{r}
+
+# create a subset of variants that only includes coding reads that have HIGH impact
+
+subVar <- variants[grep(pattern="coding", x=variants$INFO, value = FALSE), ] 
+subVar <- subVar[grep("HIGH", subVar$INFO), ]
+
+name <- c()
+
+# get names of genes that are coding with HIGH impact
+for (i in 1:length(subVar$INFO)) {
+  gene <- strsplit(subVar$INFO[i], "|", fixed = TRUE)
+  name <- c(name, gene[[1]][4])
+}
+
+name # returns gene names 
+
+```
+interesting that there was only 4 that have high impact. Good for person because less means less impact
+
+
+
+An indel that is larger than 60 nucleotides could be an issue for analysis because the reads we receive are only 58 nucleotides long so there is a possibility that the entire read is an indel 
+
+
+
+```{r}
+
+
+vaf <- c()
+
+for (i in 1:length(variants$ws20171223_MPs_tomatoMuscle8wkQuiescent201)) {
+  formatSplit <- strsplit(variants$FORMAT[i], ":") # split column by colons
+  index_ad <- which(formatSplit[[1]] == "AD") # determine which index is the AD argument 
+
+  genoSplit <- strsplit(variants$ws20171223_MPs_tomatoMuscle8wkQuiescent201[i], ":") # split column by colons
+  altSplit <- strsplit(genoSplit[[1]][index_ad], ",") # split the AD argument into REF (first position) and ALT (second          position)
+  
+  vaf <- c(vaf, as.numeric(altSplit[[1]][2])/(as.numeric(altSplit[[1]][1])+as.numeric(altSplit[[1]][2])))
+}
+
+sum(vaf > 0.05) # returns number of variants with VAF > 5%
+boxplot(vaf)
+
+```
+
+```{r}
+
+# for protein coding regions
+
+codingSub <- variants[grep(pattern="protein_coding", x=variants$INFO, value = FALSE), ]
+
+vafC <- c()
+
+for (i in 1:length(codingSub$ws20171223_MPs_tomatoMuscle8wkQuiescent201)) {
+  formatSplitC <- strsplit(codingSub$FORMAT[i], ":") # split column by colons
+  index_adC <- which(formatSplitC[[1]] == "AD") # determine which index is the AD argument 
+
+  genoSplitC <- strsplit(codingSub$ws20171223_MPs_tomatoMuscle8wkQuiescent201[i], ":") # split column by colons
+  altSplitC <- strsplit(genoSplitC[[1]][index_adC], ",") # split the AD argument into REF (first position) and ALT (second          position)
+  
+  vafC <- c(vafC, as.numeric(altSplitC[[1]][2])/(as.numeric(altSplitC[[1]][1])+as.numeric(altSplitC[[1]][2])))
+}
+
+sum(vafC > 0.05) # returns number of variants with VAF > 5%
+
+```
+
+DP = informative reads
+AD = (#1,#2):
+  #1 = # of reads that supported the REF allele
+  #2 = # of reads that supported the ALT allele
+
